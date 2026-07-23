@@ -1,0 +1,5 @@
+[project]
+name = "psyinsight-ai"
+version = "0.1.0"
+description = "AI-powered research platform for psychology and data science"
+requires-python = ">=3.10"
