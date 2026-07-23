@@ -1,0 +1,10 @@
+Participant_ID,Age,Gender,Stress_Score,Sleep_Hours,Depression_Score
+1,21,M,8,6,12
+2,22,F,5,8,7
+3,20,F,,7,10
+4,22,M,6,,9
+5,21,F,5,8,7
+5,21,F,5,8,7
+6,23,M,9,5,15
+7,22,F,4,9,6
+8,,M,7,6,11
