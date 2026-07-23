@@ -1,11 +1,13 @@
 """
-PsyInsight AI
-Data Validation Engine
+validator.py
+------------
+
+Data Validation Engine for PsyInsight AI
 
 Author: Subhranshu Ranjan Sahoo
 
-This module validates psychology datasets before
-machine learning and statistical analysis.
+This module validates datasets before statistical analysis
+or machine learning.
 """
 
 import pandas as pd
@@ -13,35 +15,55 @@ import pandas as pd
 
 class DataValidator:
     """
-    Validates datasets before preprocessing.
+    Validates a pandas DataFrame.
     """
 
-    def __init__(self, dataframe):
-        """
-        Store the dataset.
-        """
-        self.df = dataframe
+    def __init__(self, dataframe: pd.DataFrame):
+        self.dataframe = dataframe
 
-    def dataset_shape(self):
+    def check_missing_values(self):
         """
-        Returns the number of rows and columns.
+        Returns missing values in each column.
         """
-        return self.df.shape
+        return self.dataframe.isnull().sum()
 
-    def missing_values(self):
+    def check_duplicate_rows(self):
         """
-        Returns missing values in every column.
+        Returns the number of duplicate rows.
         """
-        return self.df.isnull().sum()
+        return self.dataframe.duplicated().sum()
 
-    def duplicate_rows(self):
+    def check_empty_columns(self):
         """
-        Returns duplicate row count.
+        Returns columns containing only missing values.
         """
-        return self.df.duplicated().sum()
+        return self.dataframe.columns[
+            self.dataframe.isnull().all()
+        ].tolist()
 
-    def data_types(self):
+    def check_constant_columns(self):
         """
-        Returns datatype of each column.
+        Returns columns containing only one unique value.
         """
-        return self.df.dtypes
+        constant_columns = []
+
+        for column in self.dataframe.columns:
+            if self.dataframe[column].nunique(dropna=False) == 1:
+                constant_columns.append(column)
+
+        return constant_columns
+
+    def validate(self):
+        """
+        Runs all validation checks.
+        """
+        report = {
+            "Rows": self.dataframe.shape[0],
+            "Columns": self.dataframe.shape[1],
+            "Missing Values": self.check_missing_values().to_dict(),
+            "Duplicate Rows": self.check_duplicate_rows(),
+            "Empty Columns": self.check_empty_columns(),
+            "Constant Columns": self.check_constant_columns(),
+        }
+
+        return report
