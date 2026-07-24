@@ -34,3 +34,84 @@ class DataLoader:
             raise FileNotFoundError(f"File not found: {file_path}")
         except Exception as e:
             raise Exception(f"Error loading CSV file: {e}")
+
+    @staticmethod
+    def load_excel(file_path: str) -> pd.DataFrame:
+        """
+        Load an Excel file into a pandas DataFrame.
+
+        Args:
+            file_path: Path to the Excel file.
+
+        Returns:
+            pandas.DataFrame
+        """
+        try:
+            return pd.read_excel(file_path)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {file_path}")
+        except Exception as e:
+            raise Exception(f"Error loading Excel file: {e}")
+
+    @staticmethod
+    def load_json(file_path: str) -> pd.DataFrame:
+        """
+        Load a JSON file into a pandas DataFrame.
+
+        Args:
+            file_path: Path to the JSON file.
+
+        Returns:
+            pandas.DataFrame
+        """
+        try:
+            return pd.read_json(file_path)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {file_path}")
+        except Exception as e:
+            raise Exception(f"Error loading JSON file: {e}")
+
+    @staticmethod
+    def detect_file_type(file_path: str) -> str:
+        """
+        Detect the file extension.
+
+        Args:
+            file_path: Path to the dataset.
+
+        Returns:
+            File extension as a string.
+        """
+        return Path(file_path).suffix.lower()
+
+    @staticmethod
+    def load(file_path: str) -> pd.DataFrame:
+        """
+        Automatically load a dataset based on its file extension.
+
+        Supported formats:
+        - CSV
+        - Excel (.xlsx, .xls)
+        - JSON
+
+        Args:
+            file_path: Path to the dataset.
+
+        Returns:
+            pandas.DataFrame
+        """
+        extension = DataLoader.detect_file_type(file_path)
+
+        if extension == ".csv":
+            return DataLoader.load_csv(file_path)
+
+        elif extension in [".xlsx", ".xls"]:
+            return DataLoader.load_excel(file_path)
+
+        elif extension == ".json":
+            return DataLoader.load_json(file_path)
+
+        else:
+            raise ValueError(
+                f"Unsupported file format: {extension}"
+            )
