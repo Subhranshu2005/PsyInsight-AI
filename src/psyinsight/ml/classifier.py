@@ -79,8 +79,9 @@ from sklearn.model_selection import (
     StratifiedKFold,
     learning_curve,
     validation_curve,
+    GridSearchCV,
+    RandomizedSearchCV,
 )
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -528,7 +529,8 @@ class PsyClassifierCore(ModelRegistryMixin):
             "F1 Score": self.f1(y_true, y_pred),
             "Interpretation": self.interpretation(accuracy),
         }
-        # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
     # Information Utilities
     # ------------------------------------------------------------------
 
@@ -571,6 +573,62 @@ class PsyClassifierCore(ModelRegistryMixin):
         Return current classifier version.
         """
         return __version__
+
+    def tune_hyperparameters(
+        self,
+        X_train,
+        y_train,
+        param_grid,
+        search="grid",
+        cv=5,
+        scoring="accuracy",
+        n_iter=20,
+    ):
+        """
+        Tune hyperparameters using GridSearchCV or RandomizedSearchCV.
+        """
+
+        self._require_model()
+
+        if search.lower() == "grid":
+            searcher = GridSearchCV(
+                estimator=self.model,
+                param_grid=param_grid,
+                cv=cv,
+                scoring=scoring,
+                n_jobs=-1,
+            )
+
+        elif search.lower() == "random":
+            searcher = RandomizedSearchCV(
+                estimator=self.model,
+                param_distributions=param_grid,
+                n_iter=n_iter,
+                cv=cv,
+                scoring=scoring,
+                random_state=self.random_state,
+                n_jobs=-1,
+            )
+
+        else:
+            raise ValueError("search must be either 'grid' or 'random'.")
+
+        searcher.fit(X_train, y_train)
+
+        self.model = searcher.best_estimator_
+        self.is_fitted = True
+
+        self.best_parameters = searcher.best_params_
+        self.best_score = searcher.best_score_
+        self.search_method = search.title()
+
+        return {
+            "Best Parameters": searcher.best_params_,
+            "Best Cross Validation Score": searcher.best_score_,
+            "Best Estimator": searcher.best_estimator_,
+            "Search Method": search.title(),
+        }
+
     # ------------------------------------------------------------------
     # Reset
     # ------------------------------------------------------------------
