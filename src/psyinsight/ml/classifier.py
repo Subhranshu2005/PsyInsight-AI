@@ -528,7 +528,49 @@ class PsyClassifierCore(ModelRegistryMixin):
             "F1 Score": self.f1(y_true, y_pred),
             "Interpretation": self.interpretation(accuracy),
         }
+        # ------------------------------------------------------------------
+    # Information Utilities
+    # ------------------------------------------------------------------
 
+    def available_algorithms(self):
+        """
+        Return all supported classification algorithms.
+        """
+        return {
+            key: self.model_label(key)
+            for key in self.available_models()
+        }
+
+    def model_info(self):
+        """
+        Return information about the currently selected model.
+        """
+        self._require_model()
+
+        return {
+            "Model Name": self.model_name,
+            "Model Type": type(self.model).__name__,
+            "Parameters": self.model.get_params(),
+            "Fitted": self.is_fitted,
+        }
+
+    def framework(self):
+        """
+        Return framework information.
+        """
+        return {
+            "Framework": "PsyInsight AI",
+            "Module": "Machine Learning",
+            "Component": "PsyClassifier",
+            "Version": __version__,
+            "Supported Models": len(self.available_models()),
+        }
+
+    def version(self):
+        """
+        Return current classifier version.
+        """
+        return __version__
     # ------------------------------------------------------------------
     # Reset
     # ------------------------------------------------------------------
