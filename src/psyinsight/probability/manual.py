@@ -20,77 +20,92 @@ class ManualProbability:
         """
         Compute the Probability Density Function (PDF)
         of the Normal Distribution manually.
-
-        Parameters:
-            x (float): Value at which PDF is evaluated.
-            mean (float): Mean of the distribution.
-            std (float): Standard deviation.
-
-        Returns:
-            float: Probability density.
         """
 
         if std <= 0:
             raise ValueError("Standard deviation must be greater than zero.")
 
-        # Normalization term
         coefficient = 1 / (std * math.sqrt(2 * math.pi))
-
-        # Exponential term
         exponent = -0.5 * ((x - mean) / std) ** 2
 
-        # Final PDF
-        pdf = coefficient * math.exp(exponent)
+        return coefficient * math.exp(exponent)
 
-        return pdf
+    @staticmethod
+    def factorial(n: int) -> int:
+        """
+        Compute the factorial of a non-negative integer.
+        """
+
+        if n < 0:
+            raise ValueError(
+                "Factorial is not defined for negative numbers."
+            )
+
+        return math.factorial(n)
 
     @staticmethod
     def combination(n: int, k: int) -> int:
         """
         Compute the number of combinations (n choose k).
-
-        Parameters:
-            n (int): Total number of items.
-            k (int): Number of selected items.
-
-        Returns:
-            int: Number of possible combinations.
         """
 
         if k < 0 or k > n:
             raise ValueError("k must satisfy 0 <= k <= n.")
 
-        return math.factorial(n) // (
-            math.factorial(k) * math.factorial(n - k)
+        return (
+            ManualProbability.factorial(n)
+            // (
+                ManualProbability.factorial(k)
+                * ManualProbability.factorial(n - k)
+            )
         )
 
     @staticmethod
-    def binomial_pmf(n: int, k: int, p: float) -> float:
+    def binomial_pmf(
+        n: int,
+        k: int,
+        p: float
+    ) -> float:
         """
         Compute the Probability Mass Function (PMF)
         of the Binomial Distribution manually.
-
-        Parameters:
-            n (int): Total number of trials.
-            k (int): Number of successful trials.
-            p (float): Probability of success.
-
-        Returns:
-            float: Binomial probability.
         """
 
         if not (0 <= p <= 1):
-            raise ValueError("Probability p must be between 0 and 1.")
-
-        if k < 0 or k > n:
-            raise ValueError("k must satisfy 0 <= k <= n.")
+            raise ValueError(
+                "Probability must be between 0 and 1."
+            )
 
         combinations = ManualProbability.combination(n, k)
 
-        probability = (
+        return (
             combinations
             * (p ** k)
             * ((1 - p) ** (n - k))
         )
 
-        return probability
+    @staticmethod
+    def poisson_pmf(
+        k: int,
+        lam: float
+    ) -> float:
+        """
+        Compute the Probability Mass Function (PMF)
+        of the Poisson Distribution manually.
+        """
+
+        if k < 0:
+            raise ValueError(
+                "k must be non-negative."
+            )
+
+        if lam <= 0:
+            raise ValueError(
+                "Lambda must be greater than zero."
+            )
+
+        return (
+            (lam ** k)
+            * math.exp(-lam)
+            / ManualProbability.factorial(k)
+        )
