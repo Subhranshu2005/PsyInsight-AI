@@ -498,3 +498,310 @@ class PsyClusteringCore(ClusterRegistryMixin):
         return self
 
     clear = reset
+        # ==================================================
+    # Training / Prediction
+    # ==================================================
+
+    def fit(self, X):
+        """
+        Fit the selected clustering model.
+        """
+
+        self._require_model()
+
+        # Gaussian Mixture
+        if self.model_key == "gmm":
+
+            self.model.fit(X)
+
+            self.labels_ = self.model.predict(X)
+
+            self.cluster_centers_ = self.model.means_
+
+        else:
+
+            self.labels_ = self.model.fit_predict(X)
+
+            if hasattr(self.model, "cluster_centers_"):
+                self.cluster_centers_ = self.model.cluster_centers_
+            else:
+                self.cluster_centers_ = None
+
+        self.is_fitted = True
+
+        return self
+
+    def fit_predict(self, X):
+        """
+        Fit the model and return cluster labels.
+        """
+
+        self.fit(X)
+
+        return self.labels_
+
+    def predict(self, X):
+        """
+        Predict cluster labels for new samples.
+
+        Raises an informative error if the selected
+        algorithm does not support prediction.
+        """
+
+        self._require_fitted()
+
+        if hasattr(self.model, "predict"):
+
+            return self.model.predict(X)
+
+        raise AttributeError(
+            f"{self.model_name} does not support predict()."
+        )
+
+    def transform(self, X):
+        """
+        Distance / similarity transformation.
+        """
+
+        self._require_fitted()
+
+        if hasattr(self.model, "transform"):
+
+            return self.model.transform(X)
+
+        raise AttributeError(
+            f"{self.model_name} does not support transform()."
+        )
+
+    # ==================================================
+    # Cluster Information
+    # ==================================================
+
+    def cluster_labels(self):
+        """
+        Return cluster labels.
+        """
+
+        self._require_fitted()
+
+        return self.labels_
+
+    def number_of_clusters(self):
+        """
+        Return number of discovered clusters.
+        """
+
+        self._require_fitted()
+
+        labels = np.asarray(self.labels_)
+
+        unique = np.unique(labels)
+
+        if -1 in unique:
+            unique = unique[unique != -1]
+
+        return len(unique)
+
+    def cluster_centers(self):
+        """
+        Return cluster centers if available.
+        """
+
+        self._require_fitted()
+
+        return self.cluster_centers_
+
+    def cluster_sizes(self):
+        """
+        Return dictionary containing cluster sizes.
+        """
+
+        self._require_fitted()
+
+        labels = np.asarray(self.labels_)
+
+        unique, counts = np.unique(labels, return_counts=True)
+
+        return dict(zip(unique.tolist(), counts.tolist()))
+
+    # ==================================================
+    # Evaluation
+    # ==================================================
+
+    def evaluate(self, X):
+        """
+        Evaluate clustering performance.
+
+        Returns
+        -------
+        dict
+        """
+
+        self._require_fitted()
+
+        labels = np.asarray(self.labels_)
+
+        valid = labels != -1
+
+        metrics = {}
+
+        # Ignore noise labels when possible
+        X_valid = X[valid]
+        labels_valid = labels[valid]
+
+        if len(np.unique(labels_valid)) > 1:
+
+            metrics["Silhouette Score"] = silhouette_score(
+                X_valid,
+                labels_valid,
+            )
+
+            metrics["Davies Bouldin Score"] = davies_bouldin_score(
+                X_valid,
+                labels_valid,
+            )
+
+            metrics["Calinski Harabasz Score"] = calinski_harabasz_score(
+                X_valid,
+                labels_valid,
+            )
+
+        else:
+
+            metrics["Silhouette Score"] = np.nan
+            metrics["Davies Bouldin Score"] = np.nan
+            metrics["Calinski Harabasz Score"] = np.nan
+
+        if hasattr(self.model, "inertia_"):
+
+            metrics["Inertia"] = self.model.inertia_
+
+        else:
+
+            metrics["Inertia"] = np.nan
+
+        return metrics
+
+    def print_evaluation(self, X):
+        """
+        Pretty-print clustering metrics.
+        """
+
+        metrics = self.evaluate(X)
+
+        print("\n===========================")
+        print("CLUSTERING EVALUATION")
+        print("===========================\n")
+
+        for key, value in metrics.items():
+
+            if np.isnan(value):
+
+                print(f"{key:<30} N/A")
+
+            else:
+
+                print(f"{key:<30} {value:.4f}")
+
+    # ==================================================
+    # Cluster Summary
+    # ==================================================
+
+    def cluster_summary(self):
+        """
+        Return a summary DataFrame describing
+        each discovered cluster.
+        """
+
+        self._require_fitted()
+
+        labels = np.asarray(self.labels_)
+
+        unique, counts = np.unique(labels, return_counts=True)
+
+        total = len(labels)
+
+        rows = []
+
+        for label, count in zip(unique, counts):
+
+            row = {
+
+                "Cluster": int(label),
+
+                "Samples": int(count),
+
+                "Percentage": round(
+                    count * 100 / total,
+                    2,
+                ),
+
+            }
+
+            if (
+                self.cluster_centers_ is not None
+                and label >= 0
+                and label < len(self.cluster_centers_)
+            ):
+
+                row["Centroid"] = self.cluster_centers_[label]
+
+            else:
+
+                row["Centroid"] = None
+
+            rows.append(row)
+
+        return pd.DataFrame(rows)
+
+    # ==================================================
+    # Persistence
+    # ==================================================
+
+    def save_model(self, filename):
+        """
+        Save clustering model.
+        """
+
+        self._require_model()
+
+        payload = {
+
+            "model": self.model,
+
+            "model_name": self.model_name,
+
+            "model_key": self.model_key,
+
+            "labels": self.labels_,
+
+            "cluster_centers": self.cluster_centers_,
+
+            "scaler": self.scaler,
+
+        }
+
+        joblib.dump(payload, filename)
+
+    def load_model(self, filename):
+        """
+        Load clustering model.
+        """
+
+        payload = joblib.load(filename)
+
+        self.model = payload["model"]
+
+        self.model_name = payload["model_name"]
+
+        self.model_key = payload["model_key"]
+
+        self.labels_ = payload.get("labels")
+
+        self.cluster_centers_ = payload.get("cluster_centers")
+
+        self.scaler = payload.get("scaler")
+
+        self.is_fitted = True
+
+        return self
