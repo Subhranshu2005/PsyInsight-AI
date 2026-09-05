@@ -22,5 +22,11 @@ def main():
         )
 
 
+def test_interpret_returns_string_for_each_value():
+    for value in [0.01, 0.10, 0.35, 0.65, 0.92]:
+        result = ProbabilityAnalyzer.interpret(value)
+        assert isinstance(result, str) and len(result) > 0
+
+
 if __name__ == "__main__":
     main()

@@ -20,6 +20,10 @@ class DataValidator:
         """
         Initialize the validator with a pandas DataFrame.
         """
+        if not isinstance(dataframe, pd.DataFrame):
+            raise TypeError(
+                f"DataValidator expects a pandas DataFrame, got {type(dataframe).__name__}."
+            )
         self.dataframe = dataframe
 
     def dataset_shape(self):
@@ -37,7 +41,13 @@ class DataValidator:
     def missing_value_percentage(self):
         """
         Return the percentage of missing values in each column.
+
+        Returns 0.0 for every column when the dataset has no rows,
+        rather than an undefined (NaN) division-by-zero result.
         """
+        if len(self.dataframe) == 0:
+            return pd.Series(0.0, index=self.dataframe.columns)
+
         percentage = (
             self.dataframe.isnull().sum()
             / len(self.dataframe)
@@ -56,6 +66,12 @@ class DataValidator:
         Return the data type of every column.
         """
         return self.dataframe.dtypes
+
+    def is_empty(self) -> bool:
+        """
+        Return True if the dataset has no rows.
+        """
+        return len(self.dataframe) == 0
 
     def validate(self):
         """

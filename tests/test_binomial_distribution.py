@@ -29,5 +29,12 @@ def main():
         print("\n❌ Verification failed.")
 
 
+def test_binomial_pmf_matches_scipy():
+    n, k, p = 10, 8, 0.7
+    manual = ManualProbability.binomial_pmf(n, k, p)
+    scipy_value = ProbabilityEngine.binomial_probability(k, n, p)
+    assert abs(manual - scipy_value) < 1e-10
+
+
 if __name__ == "__main__":
     main()

@@ -29,5 +29,12 @@ def main():
         print("\n❌ Verification failed.")
 
 
+def test_normal_pdf_matches_scipy():
+    x, mean, std = 6, 5, 2
+    manual = ManualProbability.normal_pdf(x, mean, std)
+    scipy_value = ProbabilityEngine.normal_probability(x, mean, std)
+    assert abs(manual - scipy_value) < 1e-10
+
+
 if __name__ == "__main__":
     main()

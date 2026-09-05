@@ -409,6 +409,17 @@ class PsyClassifierCore(ModelRegistryMixin):
         )
 
     def load_model(self, filename: str):
+        """Load a model previously saved with :meth:`save_model`.
+
+        SECURITY WARNING: this deserializes with ``joblib.load``, which
+        (like ``pickle``) can execute arbitrary code embedded in the
+        file. Only ever call this on files you created yourself or that
+        came from a fully trusted source -- never on a file uploaded by
+        an untrusted user. This method is not currently wired into the
+        Streamlit app's UI; if it ever is, the upload must be restricted
+        to trusted/authenticated users only, treated the same as
+        arbitrary code execution.
+        """
         payload = joblib.load(filename)
         if isinstance(payload, dict) and "model" in payload:
             self.model = payload["model"]
@@ -466,14 +477,40 @@ class PsyClassifierCore(ModelRegistryMixin):
     def cohen_kappa(y_true, y_pred):
         return cohen_kappa_score(y_true, y_pred)
 
-    def cross_validation(self, X, y, cv: int = 5, scoring: str = "accuracy"):
-        self._require_model()
-        return cross_val_score(self.model, X, y, cv=cv, scoring=scoring)
+    def cross_validation(self, X, y, cv: int = 5, scoring: str = "accuracy", scale: bool = True):
+        """
+        K-fold cross-validation.
 
-    def stratified_cross_validation(self, X, y, splits: int = 5, scoring: str = "accuracy"):
+        Leakage note: if a scaler had already been fit on the *full*
+        ``X`` (e.g. via ``preprocess()``) before calling this method,
+        cross-validating on the resulting scaled features would leak
+        each fold's held-out data into the scaler's fitted mean/variance.
+        To make this method safe regardless of what the caller passes,
+        scaling (when ``scale=True``, the default) is done *inside* a
+        ``Pipeline`` so the scaler is fit fresh, from scratch, on only
+        the training portion of every fold.
+        """
+        self._require_model()
+        estimator = self._cv_estimator(scale)
+        return cross_val_score(estimator, X, y, cv=cv, scoring=scoring)
+
+    def stratified_cross_validation(self, X, y, splits: int = 5, scoring: str = "accuracy", scale: bool = True):
+        """Stratified k-fold cross-validation; see ``cross_validation`` for
+        the fold-internal-scaling leakage note."""
         self._require_model()
         stratified = StratifiedKFold(n_splits=splits, shuffle=True, random_state=self.random_state)
-        return cross_val_score(self.model, X, y, cv=stratified, scoring=scoring)
+        estimator = self._cv_estimator(scale)
+        return cross_val_score(estimator, X, y, cv=stratified, scoring=scoring)
+
+    def _cv_estimator(self, scale: bool):
+        """Build a fresh, unfitted estimator for cross-validation: a
+        Pipeline(StandardScaler, model) when ``scale`` is True, so
+        scaling is fit per-fold rather than once on the whole dataset."""
+        from sklearn.pipeline import make_pipeline
+
+        if scale:
+            return make_pipeline(StandardScaler(), clone(self.model))
+        return clone(self.model)
 
     def evaluate(self, y_true, y_pred) -> Dict[str, float]:
         """Core set of metrics used everywhere (leaderboard, reports, summary)."""
@@ -675,35 +712,59 @@ class AutoMLMixin:
         """
         models = models or self.available_models()
 
+        y_train_arr = np.asarray(y_train)
+        n_classes = len(np.unique(y_train_arr[~pd.isnull(y_train_arr)])) if len(y_train_arr) else 0
+        if n_classes < 2:
+            raise ValueError(
+                "Classification requires at least 2 distinct classes in the training "
+                f"target, but only {n_classes} were found. Check your target column "
+                "or choose a target with more variety."
+            )
+
         if scale:
             X_train_use, X_test_use = self.preprocess(X_train, X_test, scale=True)
         else:
             X_train_use, X_test_use = X_train, X_test
 
         rows = []
+        failures = []
         self._fitted_candidates: Dict[str, object] = {}
 
         for key in models:
-            self.set_model(key)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.fit(X_train_use, y_train)
-
-            y_pred = self.predict(X_test_use)
-            metrics = self.evaluate(y_test, y_pred)
-
             try:
-                y_proba = self.predict_probability(X_test_use)
-                metrics["ROC AUC"] = self.roc_auc(y_test, y_proba)
-            except (AttributeError, ValueError):
-                metrics["ROC AUC"] = np.nan
+                self.set_model(key)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    self.fit(X_train_use, y_train)
 
-            metrics_row = {"Model": self.model_label(key), "_key": key}
-            metrics_row.update(metrics)
-            rows.append(metrics_row)
+                y_pred = self.predict(X_test_use)
+                metrics = self.evaluate(y_test, y_pred)
 
-            # Keep a fitted, ready-to-use copy of this candidate.
-            self._fitted_candidates[key] = self.model
+                try:
+                    y_proba = self.predict_probability(X_test_use)
+                    metrics["ROC AUC"] = self.roc_auc(y_test, y_proba)
+                except (AttributeError, ValueError):
+                    metrics["ROC AUC"] = np.nan
+
+                metrics_row = {"Model": self.model_label(key), "_key": key}
+                metrics_row.update(metrics)
+                rows.append(metrics_row)
+
+                # Keep a fitted, ready-to-use copy of this candidate.
+                self._fitted_candidates[key] = self.model
+            except Exception as exc:  # noqa: BLE001
+                # One bad candidate (e.g. KNN needing more neighbors than
+                # available samples) shouldn't take down the whole
+                # comparison -- skip it and keep going, same as PsyRegressor.
+                warnings.warn(f"Model '{key}' failed during comparison: {exc}")
+                failures.append(f"{key}: {exc}")
+
+        if not rows:
+            detail = "; ".join(failures) if failures else "no candidate models were tried"
+            raise ValueError(
+                "Every candidate model failed to fit -- nothing to compare. "
+                f"Check your data (e.g. too few samples, degenerate features). Details: {detail}"
+            )
 
         results = pd.DataFrame(rows).sort_values(by="Accuracy", ascending=False).reset_index(drop=True)
         self._last_results = results
@@ -802,11 +863,23 @@ class AutoMLMixin:
                 print(r)
             print("\nRecommended for psychological classification.\n")
 
+        leaderboard_display = ranked.drop(columns=["_key"], errors="ignore")
+        test_report = {
+            k: (float(v) if isinstance(v, (int, float, np.floating, np.integer)) else v)
+            for k, v in best_row.items()
+            if k not in ("Model", "_key")
+        }
+
         return {
+            # Original schema (kept for backward compatibility).
             "results": ranked,
             "best_key": best_key,
             "best_row": best_row,
             "reasons": reasons,
+            # Schema matching PsyRegressor.auto_train(), used by the app UI.
+            "best_model": best_row["Model"],
+            "leaderboard": leaderboard_display,
+            "test_report": test_report,
         }
 
 

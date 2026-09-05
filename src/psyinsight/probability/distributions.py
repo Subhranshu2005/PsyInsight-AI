@@ -21,25 +21,29 @@ class ProbabilityEngine:
     def normal_probability(
         x: float,
         mean: float,
-        std: float
+        std: float,
+        mode: str = "pdf",
     ) -> float:
         """
-        Compute the Probability Density Function (PDF)
-        of a Normal Distribution.
+        Compute a Normal Distribution quantity at ``x``.
 
         Parameters
         ----------
         x : float
-            Value at which the PDF is evaluated.
+            Value at which the distribution is evaluated.
         mean : float
             Mean of the distribution.
         std : float
             Standard deviation.
+        mode : str
+            One of ``"pdf"`` (probability density, default — preserves the
+            original behaviour of this method), ``"cdf"`` (P(X <= x)), or
+            ``"sf"`` (survival function, P(X >= x)).
 
         Returns
         -------
         float
-            Probability density.
+            The requested probability / density value.
         """
 
         if std <= 0:
@@ -47,7 +51,13 @@ class ProbabilityEngine:
                 "Standard deviation must be greater than zero."
             )
 
-        return norm.pdf(x, loc=mean, scale=std)
+        if mode == "pdf":
+            return norm.pdf(x, loc=mean, scale=std)
+        if mode == "cdf":
+            return norm.cdf(x, loc=mean, scale=std)
+        if mode == "sf":
+            return norm.sf(x, loc=mean, scale=std)
+        raise ValueError("mode must be one of 'pdf', 'cdf', 'sf'")
 
     @staticmethod
     def binomial_probability(

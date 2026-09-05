@@ -17,6 +17,24 @@ class DataLoader:
     A class to load datasets into pandas DataFrames.
     """
 
+    # Guard against accidentally loading a huge file into memory from a
+    # script/CLI context (the Streamlit app applies its own, separate
+    # limit on uploaded files -- see app/main.py).
+    MAX_FILE_SIZE_MB: float = 200
+
+    @staticmethod
+    def _check_file_size(file_path: str) -> None:
+        path = Path(file_path)
+        if not path.exists():
+            return  # let the format-specific reader raise FileNotFoundError
+        size_mb = path.stat().st_size / (1024 * 1024)
+        if size_mb > DataLoader.MAX_FILE_SIZE_MB:
+            raise ValueError(
+                f"File '{file_path}' is {size_mb:.1f} MB, which exceeds the "
+                f"{DataLoader.MAX_FILE_SIZE_MB} MB limit. Load a smaller file, "
+                "increase DataLoader.MAX_FILE_SIZE_MB, or stream/chunk it yourself."
+            )
+
     @staticmethod
     def load_csv(file_path: str) -> pd.DataFrame:
         """
@@ -28,12 +46,19 @@ class DataLoader:
         Returns:
             pandas.DataFrame
         """
+        DataLoader._check_file_size(file_path)
         try:
-            return pd.read_csv(file_path)
+            df = pd.read_csv(file_path)
         except FileNotFoundError:
             raise FileNotFoundError(f"File not found: {file_path}")
+        except pd.errors.EmptyDataError:
+            raise ValueError(f"'{file_path}' is empty or has no parseable columns.")
         except Exception as e:
             raise Exception(f"Error loading CSV file: {e}")
+
+        if df.shape[1] == 0:
+            raise ValueError(f"'{file_path}' has no columns after parsing.")
+        return df
 
     @staticmethod
     def load_excel(file_path: str) -> pd.DataFrame:
@@ -46,6 +71,7 @@ class DataLoader:
         Returns:
             pandas.DataFrame
         """
+        DataLoader._check_file_size(file_path)
         try:
             return pd.read_excel(file_path)
         except FileNotFoundError:
@@ -64,10 +90,13 @@ class DataLoader:
         Returns:
             pandas.DataFrame
         """
+        DataLoader._check_file_size(file_path)
         try:
             return pd.read_json(file_path)
         except FileNotFoundError:
             raise FileNotFoundError(f"File not found: {file_path}")
+        except ValueError as e:
+            raise ValueError(f"'{file_path}' is not valid JSON: {e}")
         except Exception as e:
             raise Exception(f"Error loading JSON file: {e}")
 

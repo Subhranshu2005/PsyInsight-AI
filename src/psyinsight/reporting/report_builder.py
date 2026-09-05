@@ -1,0 +1,288 @@
+"""
+PsyInsight AI — ResearchReportGenerator
+==========================================
+
+Assembles the outputs of every other PsyInsight module (data validation,
+descriptive/inferential statistics, ML results, XAI explanations, NLP
+insights) into a single, readable research report — Markdown, HTML, or a
+plain-dict/JSON structure for programmatic use.
+
+Author: Subhranshu Ranjan Sahoo
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+
+from psyinsight.utils import ensure_dir, get_logger, reproducibility_snapshot
+
+__all__ = ["ResearchReportGenerator"]
+
+_logger = get_logger(__name__)
+
+
+def _to_markdown_table(obj: Any) -> str:
+    """Best-effort conversion of a dict/DataFrame/list into a Markdown block."""
+    if isinstance(obj, pd.DataFrame):
+        return obj.to_markdown(index=False)
+    if isinstance(obj, dict):
+        lines = ["| Key | Value |", "|---|---|"]
+        for k, v in obj.items():
+            if isinstance(v, (dict, list, pd.DataFrame)):
+                v = "*(see detail below)*"
+            lines.append(f"| {k} | {v} |")
+            table = "\n".join(lines)
+        return table if obj else "_empty_"
+    if isinstance(obj, list):
+        return "\n".join(f"- {item}" for item in obj) if obj else "_empty_"
+    return str(obj)
+
+
+class ResearchReportGenerator:
+    """Builds a structured research report from named "sections", each of
+    which can be free text, a dict, or a DataFrame.
+
+    Example
+    -------
+    >>> report = ResearchReportGenerator(title="Study 1: Anxiety & Sleep")
+    >>> report.add_section("Data Quality", validator.validate())
+    >>> report.add_section("Descriptive Statistics", desc.summary())
+    >>> report.add_figure_note("Figure 1", "Histogram of anxiety scores")
+    >>> report.to_markdown("report.md")
+    """
+
+    def __init__(self, title: str = "PsyInsight AI Research Report", author: str = "PsyInsight AI"):
+        self.title = title
+        self.author = author
+        self.created_at = datetime.now()
+        self.sections: List[Dict[str, Any]] = []
+        self.figures: List[Dict[str, str]] = []
+
+    # ------------------------------------------------------------------
+    # Building
+    # ------------------------------------------------------------------
+
+    def add_section(self, heading: str, content: Any, notes: Optional[str] = None) -> "ResearchReportGenerator":
+        self.sections.append({"heading": heading, "content": content, "notes": notes})
+        return self
+
+    def add_figure_note(self, label: str, description: str) -> "ResearchReportGenerator":
+        """Record a reference to a figure/plot generated elsewhere (e.g. by
+        :mod:`psyinsight.visualization`) so the report can point to it even
+        though this class does not render images itself."""
+        self.figures.append({"label": label, "description": description})
+        return self
+
+    def add_reproducibility_section(
+        self,
+        dataframe: Optional[pd.DataFrame] = None,
+        seed: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
+        heading: str = "Reproducibility",
+    ) -> "ResearchReportGenerator":
+        """Capture and attach a reproducibility snapshot: the dataset's
+        content hash, the random seed used, package/Python versions, and
+        any caller-supplied extra metadata (hyperparameters, CV folds,
+        etc.).
+
+        Call this once per analysis/report so that anyone reading the
+        report -- including a future version of yourself -- knows exactly
+        what data and code produced it, per item #5 of the robustness
+        review ("someone else should be able to reproduce your
+        experiment"). This does not *guarantee* reproducibility (that
+        also depends on determinism in the algorithms used, e.g. some
+        sklearn estimators used with parallelism), but it records every
+        piece of information needed to attempt one.
+        """
+        snapshot = reproducibility_snapshot(dataframe=dataframe, seed=seed, extra=extra)
+        return self.add_section(
+            heading,
+            snapshot,
+            notes=(
+                "Captured automatically. A different dataset_hash on a "
+                "re-run means the underlying data changed; a different "
+                "package_versions entry means the software environment "
+                "changed. Neither alone proves non-reproducibility, but "
+                "both are the first things to check if results differ."
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Export: Markdown
+    # ------------------------------------------------------------------
+
+    def to_markdown(self, path: Optional[str] = None) -> str:
+        lines = [
+            f"# {self.title}",
+            "",
+            f"*Generated by {self.author} on {self.created_at.strftime('%Y-%m-%d %H:%M:%S')}*",
+            "",
+            "---",
+            "",
+        ]
+
+        for section in self.sections:
+            lines.append(f"## {section['heading']}")
+            lines.append("")
+            if section["notes"]:
+                lines.append(f"_{section['notes']}_")
+                lines.append("")
+            lines.append(_to_markdown_table(section["content"]))
+            lines.append("")
+
+        if self.figures:
+            lines.append("## Figures")
+            lines.append("")
+            for fig in self.figures:
+                lines.append(f"**{fig['label']}** — {fig['description']}")
+                lines.append("")
+
+        markdown = "\n".join(lines)
+
+        if path:
+            ensure_dir(_dirname(path))
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(markdown)
+            _logger.info("Markdown report written to %s", path)
+
+        return markdown
+
+    # ------------------------------------------------------------------
+    # Export: HTML
+    # ------------------------------------------------------------------
+
+    def to_html(self, path: Optional[str] = None) -> str:
+        parts = [
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+            f"<title>{self.title}</title>",
+            "<style>",
+            "body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;"
+            "margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.6;}",
+            "h1{border-bottom:3px solid #4f46e5;padding-bottom:10px;}",
+            "h2{color:#4f46e5;margin-top:2em;}",
+            "table{border-collapse:collapse;width:100%;margin:1em 0;}",
+            "th,td{border:1px solid #ddd;padding:8px;text-align:left;}",
+            "th{background:#f3f4f6;}",
+            ".meta{color:#666;font-size:0.9em;}",
+            ".notes{color:#555;font-style:italic;}",
+            "</style></head><body>",
+            f"<h1>{self.title}</h1>",
+            f"<p class='meta'>Generated by {self.author} on "
+            f"{self.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p><hr/>",
+        ]
+
+        for section in self.sections:
+            parts.append(f"<h2>{section['heading']}</h2>")
+            if section["notes"]:
+                parts.append(f"<p class='notes'>{section['notes']}</p>")
+            parts.append(_to_html_block(section["content"]))
+
+        if self.figures:
+            parts.append("<h2>Figures</h2><ul>")
+            for fig in self.figures:
+                parts.append(f"<li><b>{fig['label']}</b> — {fig['description']}</li>")
+            parts.append("</ul>")
+
+        parts.append("</body></html>")
+        html = "\n".join(parts)
+
+        if path:
+            ensure_dir(_dirname(path))
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+            _logger.info("HTML report written to %s", path)
+
+        return html
+
+    # ------------------------------------------------------------------
+    # Export: dict / JSON
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> Dict[str, Any]:
+        def _clean(value):
+            if isinstance(value, pd.DataFrame):
+                return value.to_dict(orient="records")
+            return value
+
+        return {
+            "title": self.title,
+            "author": self.author,
+            "created_at": self.created_at.isoformat(),
+            "sections": [
+                {"heading": s["heading"], "content": _clean(s["content"]), "notes": s["notes"]}
+                for s in self.sections
+            ],
+            "figures": self.figures,
+        }
+
+    def to_json(self, path: Optional[str] = None) -> str:
+        payload = json.dumps(self.to_dict(), indent=2, default=str)
+        if path:
+            ensure_dir(_dirname(path))
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+            _logger.info("JSON report written to %s", path)
+        return payload
+
+    # ------------------------------------------------------------------
+    # Convenience constructors
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_pipeline(
+        cls,
+        title: str,
+        validation_report: Optional[Dict[str, Any]] = None,
+        descriptive_stats: Optional[Any] = None,
+        inferential_results: Optional[Dict[str, Any]] = None,
+        ml_report: Optional[Dict[str, Any]] = None,
+        xai_report: Optional[Dict[str, Any]] = None,
+        nlp_report: Optional[Dict[str, Any]] = None,
+    ) -> "ResearchReportGenerator":
+        """Build a full end-to-end report in one call from the outputs of
+        the other PsyInsight AI modules — the method the Streamlit app uses
+        to generate a one-click research report."""
+        report = cls(title=title)
+        if validation_report is not None:
+            report.add_section("Data Validation", validation_report)
+        if descriptive_stats is not None:
+            report.add_section("Descriptive Statistics", descriptive_stats)
+        if inferential_results is not None:
+            report.add_section("Inferential Statistics", inferential_results)
+        if ml_report is not None:
+            report.add_section("Machine Learning Results", ml_report)
+        if xai_report is not None:
+            report.add_section("Explainability (XAI)", xai_report)
+        if nlp_report is not None:
+            report.add_section("Text / NLP Insights", nlp_report)
+        return report
+
+
+def _dirname(path: str) -> str:
+    import os
+
+    return os.path.dirname(path) or "."
+
+
+def _to_html_block(content: Any) -> str:
+    if isinstance(content, pd.DataFrame):
+        return content.to_html(index=False, border=0)
+    if isinstance(content, dict):
+        rows = "".join(
+            f"<tr><td>{k}</td><td>{_short(v)}</td></tr>" for k, v in content.items()
+        )
+        return f"<table><tr><th>Key</th><th>Value</th></tr>{rows}</table>"
+    if isinstance(content, list):
+        items = "".join(f"<li>{item}</li>" for item in content)
+        return f"<ul>{items}</ul>"
+    return f"<p>{content}</p>"
+
+
+def _short(value: Any) -> str:
+    if isinstance(value, (dict, list, pd.DataFrame)):
+        return "(see detail)"
+    return str(value)

@@ -99,6 +99,7 @@ from sklearn.metrics import (
     pair_confusion_matrix,
     confusion_matrix as sk_confusion_matrix,
 )
+from sklearn.metrics.cluster import contingency_matrix as sk_contingency_matrix
 
 # ==========================
 # Plotting
@@ -446,6 +447,21 @@ class PsyClusteringCore(ClusterRegistryMixin):
         """
         self._require_model()
 
+        n_samples = len(np.asarray(X))
+        requested_k = self.model.get_params().get("n_clusters") or self.model.get_params().get(
+            "n_components"
+        )
+        if requested_k is not None and n_samples < requested_k:
+            raise InvalidClusterError(
+                f"Requested {requested_k} clusters but only {n_samples} sample(s) were "
+                "provided. Reduce the number of clusters or provide more data."
+            )
+        if n_samples < 2:
+            raise InvalidClusterError(
+                f"Clustering needs at least 2 samples; got {n_samples}. "
+                "Check your data or feature/row filters."
+            )
+
         start = time.perf_counter()
 
         if self.model_key == "gmm":
@@ -627,6 +643,12 @@ class PsyClusteringCore(ClusterRegistryMixin):
     def load_model(self, filename):
         """
         Load clustering model.
+
+        SECURITY WARNING: this deserializes with ``joblib.load``, which
+        (like ``pickle``) can execute arbitrary code embedded in the
+        file. Only call this on files you created yourself or that came
+        from a fully trusted source -- never on a file uploaded by an
+        untrusted user.
         """
         payload = joblib.load(filename)
 
@@ -2485,9 +2507,14 @@ class ExternalMetricsMixin:
         """
         Contingency table: rows = true classes, columns = discovered
         clusters, cells = sample counts.
+
+        Uses sklearn's contingency_matrix (rectangular by design) rather
+        than confusion_matrix (which is square over the union of label
+        sets, and breaks whenever the number of clusters differs from the
+        number of true classes -- the normal case in clustering).
         """
         labels, y_true = self._external_labels(y_true)
-        matrix = sk_confusion_matrix(y_true, labels)
+        matrix = sk_contingency_matrix(y_true, labels)
 
         true_names = [f"True {c}" for c in np.unique(y_true)]
         cluster_names = [f"Cluster {c}" for c in np.unique(labels)]
@@ -2902,37 +2929,60 @@ class UtilityMixin:
         """
         Time fit() for each algorithm in `algorithms` (defaults to all
         registered models) and report elapsed seconds plus cluster count.
+
+        This is a read-only diagnostic: whatever model/fit state you had
+        active before calling benchmark() (e.g. from set_model()+fit(), or
+        from auto_cluster()) is restored afterwards, regardless of which
+        algorithm happened to be timed last.
         """
         if algorithms is None:
             algorithms = self.available_models()
 
         X_use = self.preprocess(X) if scale else np.asarray(X)
 
+        # Snapshot current state so this diagnostic doesn't silently
+        # discard whatever model the caller had already selected/fitted.
+        saved_state = {
+            "model": self.model,
+            "model_key": self.model_key,
+            "model_name": self.model_name,
+            "labels_": getattr(self, "labels_", None),
+            "cluster_centers_": getattr(self, "cluster_centers_", None),
+            "is_fitted": self.is_fitted,
+        }
+
         rows = []
+        try:
+            for algorithm in algorithms:
+                self.set_model(algorithm)
 
-        for algorithm in algorithms:
-            self.set_model(algorithm)
+                start = time.perf_counter()
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        self.fit(X_use)
+                    elapsed = time.perf_counter() - start
+                    clusters = self.number_of_clusters()
+                    status = "OK"
+                except Exception as exc:
+                    elapsed = time.perf_counter() - start
+                    clusters = None
+                    status = f"Failed: {exc}"
 
-            start = time.perf_counter()
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    self.fit(X_use)
-                elapsed = time.perf_counter() - start
-                clusters = self.number_of_clusters()
-                status = "OK"
-            except Exception as exc:
-                elapsed = time.perf_counter() - start
-                clusters = None
-                status = f"Failed: {exc}"
-
-            rows.append({
-                "Algorithm": self.model_label(algorithm),
-                "_key": algorithm,
-                "Seconds": elapsed,
-                "Clusters": clusters,
-                "Status": status,
-            })
+                rows.append({
+                    "Algorithm": self.model_label(algorithm),
+                    "_key": algorithm,
+                    "Seconds": elapsed,
+                    "Clusters": clusters,
+                    "Status": status,
+                })
+        finally:
+            self.model = saved_state["model"]
+            self.model_key = saved_state["model_key"]
+            self.model_name = saved_state["model_name"]
+            self.labels_ = saved_state["labels_"]
+            self.cluster_centers_ = saved_state["cluster_centers_"]
+            self.is_fitted = saved_state["is_fitted"]
 
         return pd.DataFrame(rows).sort_values("Seconds").reset_index(drop=True)
 

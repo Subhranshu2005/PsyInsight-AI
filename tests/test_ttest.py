@@ -34,3 +34,21 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def test_independent_t_test_returns_result():
+    df = DataLoader.load("datasets/sample_psychology_data.csv")
+    cleaner = DataCleaner(df)
+    cleaner.remove_duplicates()
+    cleaner.fill_missing_values()
+    cleaner.rename_columns()
+    clean_df = cleaner.get_dataframe()
+
+    stats = InferentialStatistics(clean_df)
+    result = stats.independent_t_test(
+        column="stress_score",
+        group_column="gender",
+        group1="M",
+        group2="F",
+    )
+    assert result is not None

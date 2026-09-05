@@ -16,6 +16,10 @@ class DataCleaner:
     """
 
     def __init__(self, dataframe: pd.DataFrame):
+        if not isinstance(dataframe, pd.DataFrame):
+            raise TypeError(
+                f"DataCleaner expects a pandas DataFrame, got {type(dataframe).__name__}."
+            )
         self.dataframe = dataframe
 
     def remove_duplicates(self) -> pd.DataFrame:
@@ -35,9 +39,14 @@ class DataCleaner:
     def rename_columns(self) -> pd.DataFrame:
         """
         Standardize column names.
+
+        Coerces column labels to strings first, so datasets with
+        integer or mixed-type column headers don't raise an
+        AttributeError on the `.str` accessor.
         """
         self.dataframe.columns = (
             self.dataframe.columns
+            .astype(str)
             .str.strip()
             .str.lower()
             .str.replace(" ", "_")
